@@ -1,101 +1,146 @@
 using System.Text;
 using System.Text.Json;
-using InfoClusMonitor.Api.Models;
+using InfoClusMonitor.Api.Models.Dtos;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
 
 namespace InfoClusMonitor.Api.Services;
 
-public interface IRabbitMQService : IDisposable
+public interface IRabbitMqService : IDisposable
 {
-    Task SendCommandAsync(Guid commandId, string machineId, string parameters);
-    event Action<CommandResultDto>? OnCommandResult;
+    Task SendCommandAsync(long commandId, string machineId, string parameters);
+    void StartConsuming(
+        Func<AgentRegisterDto, Task> onRegister,
+        Func<string, AgentHeartbeatDto, Task> onHeartbeat,
+        Func<CommandResultDto, Task> onResult
+    );
 }
 
-public class RabbitMQService : IRabbitMQService
+public class RabbitMqService : IRabbitMqService
 {
     private readonly IConnection _connection;
     private readonly IChannel _channel;
-    private readonly ILogger<RabbitMQService> _logger;
+    private readonly ILogger<RabbitMqService> _logger;
     private readonly string _exchange = "infoclus.commands";
-    private readonly string _resultsQueue = "infoclus.results";
+    private readonly string _eventsQueue = "infoclus.backend.events";
+    private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
+    private bool _isConsuming = false;
 
-    public event Action<CommandResultDto>? OnCommandResult;
-
-    public RabbitMQService(IConfiguration configuration, ILogger<RabbitMQService> logger)
+    public RabbitMqService(IConfiguration configuration, ILogger<RabbitMqService> logger)
     {
         _logger = logger;
 
         var factory = new ConnectionFactory
         {
-            HostName = configuration["RabbitMQ:Host"] ?? "localhost",
+            HostName = configuration["RabbitMQ:Host"] ?? "45.10.154.37",
             Port = int.Parse(configuration["RabbitMQ:Port"] ?? "5672"),
-            UserName = configuration["RabbitMQ:Username"] ?? "guest",
-            Password = configuration["RabbitMQ:Password"] ?? "guest",
+            UserName = configuration["RabbitMQ:Username"] ?? "infodes",
+            Password = configuration["RabbitMQ:Password"] ?? "SydJqe93jV4o",
             AutomaticRecoveryEnabled = true,
-            NetworkRecoveryInterval = TimeSpan.FromSeconds(10)
+            NetworkRecoveryInterval = TimeSpan.FromSeconds(5)
         };
+
+        _logger.LogInformation("Conectando RabbitMqService a {Host}:{Port}...", factory.HostName, factory.Port);
 
         _connection = factory.CreateConnectionAsync().Result;
         _channel = _connection.CreateChannelAsync().Result;
 
         _channel.ExchangeDeclareAsync(_exchange, ExchangeType.Topic, durable: true).Wait();
-        _channel.QueueDeclareAsync(_resultsQueue, durable: true, exclusive: false, autoDelete: false).Wait();
-        _channel.QueueBindAsync(_resultsQueue, _exchange, "result.*").Wait();
+        _channel.QueueDeclareAsync(_eventsQueue, durable: true, exclusive: false, autoDelete: false).Wait();
 
-        StartConsumingResults();
+        // Usamos # para capturar cualquier sub-clave sin importar puntos o caracteres
+        _channel.QueueBindAsync(_eventsQueue, _exchange, "register.#").Wait();
+        _channel.QueueBindAsync(_eventsQueue, _exchange, "register.*").Wait();
+        _channel.QueueBindAsync(_eventsQueue, _exchange, "heartbeat.#").Wait();
+        _channel.QueueBindAsync(_eventsQueue, _exchange, "heartbeat.*").Wait();
+        _channel.QueueBindAsync(_eventsQueue, _exchange, "result.#").Wait();
+        _channel.QueueBindAsync(_eventsQueue, _exchange, "result.*").Wait();
+
+        _logger.LogInformation("Cola de eventos {Queue} vinculada al exchange {Exchange} exitosamente.", _eventsQueue, _exchange);
     }
 
-    private void StartConsumingResults()
+    public void StartConsuming(
+        Func<AgentRegisterDto, Task> onRegister,
+        Func<string, AgentHeartbeatDto, Task> onHeartbeat,
+        Func<CommandResultDto, Task> onResult)
     {
+        if (_isConsuming) return;
+        _isConsuming = true;
+
         var consumer = new AsyncEventingBasicConsumer(_channel);
         consumer.ReceivedAsync += async (_, ea) =>
         {
             var body = ea.Body.ToArray();
             var json = Encoding.UTF8.GetString(body);
-            _logger.LogInformation("Result received: {Json}", json);
+            var routingKey = ea.RoutingKey;
+            _logger.LogInformation("Mensaje recibido de RabbitMQ [{RoutingKey}]: {Json}", routingKey, json);
 
             try
             {
-                var result = JsonSerializer.Deserialize<CommandResultDto>(json);
-                if (result != null)
+                if (routingKey.StartsWith("register.", StringComparison.OrdinalIgnoreCase))
                 {
-                    OnCommandResult?.Invoke(result);
+                    var dto = JsonSerializer.Deserialize<AgentRegisterDto>(json, _jsonOptions);
+                    if (dto != null)
+                    {
+                        var agentId = string.IsNullOrWhiteSpace(dto.AgentId) ? routingKey["register.".Length..] : dto.AgentId;
+                        var finalDto = dto with { AgentId = agentId };
+                        await onRegister(finalDto);
+                    }
                 }
+                else if (routingKey.StartsWith("heartbeat.", StringComparison.OrdinalIgnoreCase))
+                {
+                    var dto = JsonSerializer.Deserialize<AgentHeartbeatDto>(json, _jsonOptions);
+                    if (dto != null)
+                    {
+                        var agentId = !string.IsNullOrWhiteSpace(dto.AgentId) ? dto.AgentId : routingKey["heartbeat.".Length..];
+                        await onHeartbeat(agentId, dto);
+                    }
+                }
+                else if (routingKey.StartsWith("result.", StringComparison.OrdinalIgnoreCase))
+                {
+                    var result = JsonSerializer.Deserialize<CommandResultDto>(json, _jsonOptions);
+                    if (result != null)
+                    {
+                        await onResult(result);
+                    }
+                }
+
                 await _channel.BasicAckAsync(ea.DeliveryTag, false);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error processing result");
+                _logger.LogError(ex, "Error al procesar mensaje RabbitMQ para routing key: {RoutingKey}", routingKey);
                 await _channel.BasicNackAsync(ea.DeliveryTag, false, false);
             }
         };
 
-        _channel.BasicConsumeAsync(_resultsQueue, autoAck: false, consumer: consumer).Wait();
+        _channel.BasicConsumeAsync(_eventsQueue, autoAck: false, consumer: consumer).Wait();
+        _logger.LogInformation("Consumidor de RabbitMQ iniciado para la cola {Queue}.", _eventsQueue);
     }
 
-    public async Task SendCommandAsync(Guid commandId, string machineId, string parameters)
+    public async Task SendCommandAsync(long commandId, string machineId, string parameters)
     {
         var routingKey = $"command.{machineId}";
 
         var body = JsonSerializer.Serialize(new
         {
-            CommandId = commandId,
-            MachineId = machineId,
-            Type = "Exe",
-            Parameters = parameters
+            commandId = commandId.ToString(),
+            machineId = machineId,
+            type = "Exe",
+            parameters = parameters
         });
 
         var bytes = Encoding.UTF8.GetBytes(body);
 
         var props = new BasicProperties
         {
-            Persistent = true,
+            DeliveryMode = DeliveryModes.Persistent,
             MessageId = commandId.ToString(),
             CorrelationId = commandId.ToString()
         };
 
         await _channel.BasicPublishAsync(_exchange, routingKey, true, props, bytes);
+        _logger.LogInformation("Comando publicado a RabbitMQ [{RoutingKey}]: {CommandId} -> {Parameters}", routingKey, commandId, parameters);
     }
 
     public void Dispose()

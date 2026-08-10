@@ -1,20 +1,12 @@
 using System.Text.Json.Serialization;
+using InfoClusMonitor.Api.Commons;
+using InfoClusMonitor.Api.Commons.Enums;
 
-namespace InfoClusMonitor.Api.Models;
+namespace InfoClusMonitor.Api.Models.Entities;
 
-public enum CommandStatus
+public class Command : BaseEntity
 {
-    Pending,
-    Sent,
-    Running,
-    Completed,
-    Failed
-}
-
-public class Command
-{
-    public Guid Id { get; set; } = Guid.NewGuid();
-    public string MachineId { get; set; } = string.Empty;
+    public string ExternalMachineId { get; set; } = string.Empty;
     public string Type { get; set; } = "Exe";
     public string Parameters { get; set; } = string.Empty;
     public CommandStatus Status { get; set; } = CommandStatus.Pending;
@@ -24,5 +16,5 @@ public class Command
     public DateTime? CompletedAt { get; set; }
 
     [JsonIgnore]
-    public Machine Machine { get; set; } = null!;
+    public Machine? Machine { get; set; }
 }

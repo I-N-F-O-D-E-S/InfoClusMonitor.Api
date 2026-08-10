@@ -1,14 +1,111 @@
+using System.Text;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.IdentityModel.Tokens;
+using Microsoft.OpenApi.Models;
 using InfoClusMonitor.Api.Data;
 using InfoClusMonitor.Api.Hubs;
+using InfoClusMonitor.Api.Models;
 using InfoClusMonitor.Api.Services;
+using InfoClusMonitor.Api.Services.Auth;
 
 var builder = WebApplication.CreateBuilder(args);
 
-builder.Services.AddControllers();
-builder.Services.AddOpenApi();
-builder.Services.AddSignalR();
+// Controllers & API Explorer
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    });
+builder.Services.AddEndpointsApiExplorer();
 
+// Swagger / OpenAPI with JWT Bearer configuration
+builder.Services.AddSwaggerGen(options =>
+{
+    options.SwaggerDoc("v1", new OpenApiInfo
+    {
+        Title = "InfoClusMonitor API",
+        Version = "v1",
+        Description = "API de administración de máquinas Linux con RabbitMQ, SignalR y Autenticación JWT"
+    });
+
+    options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
+    {
+        Name = "Authorization",
+        Type = SecuritySchemeType.Http,
+        Scheme = "bearer",
+        BearerFormat = "JWT",
+        In = ParameterLocation.Header,
+        Description = "Ingrese el token JWT Bearer en el campo de texto.\r\nEjemplo: \"eyJhbGciOi...\""
+    });
+
+    options.AddSecurityRequirement(new OpenApiSecurityRequirement
+    {
+        {
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference
+                {
+                    Type = ReferenceType.SecurityScheme,
+                    Id = "Bearer"
+                }
+            },
+            Array.Empty<string>()
+        }
+    });
+});
+
+// SignalR & MediatR
+builder.Services.AddSignalR()
+    .AddJsonProtocol(options =>
+    {
+        options.PayloadSerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+    });
+builder.Services.AddMediatR(cfg => cfg.RegisterServicesFromAssembly(typeof(Program).Assembly));
+
+// Auth & Token Service
+builder.Services.AddScoped<TokenService>();
+
+var securityKey = builder.Configuration["Auth:SecurityKey"]
+    ?? throw new InvalidOperationException("Auth:SecurityKey no está configurado en appsettings.json.");
+
+builder.Services.AddAuthentication(options =>
+{
+    options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
+    options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
+})
+.AddJwtBearer(options =>
+{
+    options.RequireHttpsMetadata = false;
+    options.SaveToken = true;
+    options.TokenValidationParameters = new TokenValidationParameters
+    {
+        ValidateIssuerSigningKey = true,
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(securityKey)),
+        ValidateIssuer = false,
+        ValidateAudience = false,
+        ClockSkew = TimeSpan.Zero
+    };
+
+    // Soporte para autenticación en SignalR vía query string "access_token"
+    options.Events = new JwtBearerEvents
+    {
+        OnMessageReceived = context =>
+        {
+            var accessToken = context.Request.Query["access_token"];
+            var path = context.HttpContext.Request.Path;
+            if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs/machines"))
+            {
+                context.Token = accessToken;
+            }
+            return Task.CompletedTask;
+        }
+    };
+});
+
+builder.Services.AddAuthorization();
+
+// Database
 builder.Services.AddDbContext<AppDbContext>(options =>
 {
     var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
@@ -23,35 +120,52 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     }
 });
 
-builder.Services.AddSingleton<IRabbitMQService, RabbitMQService>();
-builder.Services.AddHostedService<CommandResultProcessor>();
+// RabbitMQ services
+builder.Services.AddSingleton<IRabbitMqService, RabbitMqService>();
+builder.Services.AddHostedService<AgentMessageProcessor>();
+
+// CORS
+var corsOrigins = builder.Configuration["Cors:AllowedOrigins"]?
+    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 
 builder.Services.AddCors(options =>
 {
     options.AddDefaultPolicy(policy =>
     {
-        policy.WithOrigins("http://localhost:5173")
-              .AllowAnyMethod()
-              .AllowAnyHeader()
-              .AllowCredentials();
+        if (corsOrigins != null && corsOrigins.Length > 0)
+        {
+            policy.WithOrigins(corsOrigins)
+                  .AllowAnyMethod()
+                  .AllowAnyHeader()
+                  .AllowCredentials();
+        }
+        else
+        {
+            policy.SetIsOriginAllowed(_ => true)
+                  .AllowAnyMethod()
+                  .AllowAnyHeader()
+                  .AllowCredentials();
+        }
     });
 });
 
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment())
+// Swagger UI middleware
+app.UseSwagger();
+app.UseSwaggerUI(c =>
 {
-    app.MapOpenApi();
-}
+    c.SwaggerEndpoint("/swagger/v1/swagger.json", "InfoClusMonitor API v1");
+    c.RoutePrefix = "swagger";
+});
 
 app.UseCors();
+app.UseAuthentication();
+app.UseAuthorization();
 app.MapControllers();
 app.MapHub<MachineHub>("/hubs/machines");
 
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.EnsureCreated();
-}
+// Inicialización y seed de base de datos
+await DbInitializer.SeedAsync(app.Services);
 
 app.Run();

@@ -1,6 +1,6 @@
-using System.Text.Json.Serialization;
+using InfoClusMonitor.Api.Commons;
 
-namespace InfoClusMonitor.Api.Models;
+namespace InfoClusMonitor.Api.Models.Entities;
 
 public enum MachineStatus
 {
@@ -10,12 +10,14 @@ public enum MachineStatus
     Error
 }
 
-public class Machine
+public class Machine : BaseEntity
 {
-    public string Id { get; set; } = string.Empty;
+    public string ExternalMachineId { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string Hostname { get; set; } = string.Empty;
     public string IpAddress { get; set; } = string.Empty;
+    public string PrivateIpAddress { get; set; } = string.Empty;
+    public string PublicIpAddress { get; set; } = string.Empty;
     public string Os { get; set; } = string.Empty;
     public MachineStatus Status { get; set; } = MachineStatus.Offline;
     public string AgentVersion { get; set; } = string.Empty;
@@ -27,6 +29,5 @@ public class Machine
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
-    [JsonIgnore]
     public List<Command> Commands { get; set; } = new();
 }
