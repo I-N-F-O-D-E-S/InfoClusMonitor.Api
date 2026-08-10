@@ -32,7 +32,7 @@ public static class DbInitializer
                     UserId = Guid.NewGuid().ToString(),
                     Username = "admin",
                     Email = "admin@infoclus.local",
-                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("admin123"),
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("45bldGBkM9d4"),
                     Role = "Admin",
                     CreatedAt = DateTime.UtcNow
                 };
