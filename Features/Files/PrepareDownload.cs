@@ -32,22 +32,33 @@ public class PrepareDownloadHandler(
 
         var downloadId = Guid.NewGuid().ToString("N");
         
-        // Determinar nombre del archivo
+        // Determinar nombre del archivo y ruta de origen
         string fileName;
+        string resolvedSourcePath;
+
         if (dto.SelectedPaths != null && dto.SelectedPaths.Count > 1)
         {
             fileName = $"archive_selected_{DateTime.UtcNow:yyyyMMdd_HHmmss}.tar.gz";
+            resolvedSourcePath = dto.Path;
         }
-        else if (dto.IsDirectory || (dto.SelectedPaths != null && dto.SelectedPaths.Count == 1 && dto.IsDirectory))
+        else if (dto.SelectedPaths != null && dto.SelectedPaths.Count == 1)
         {
+            resolvedSourcePath = dto.SelectedPaths[0];
+            var baseName = Path.GetFileName(resolvedSourcePath.TrimEnd('/', '\\'));
+            if (string.IsNullOrEmpty(baseName)) baseName = "item";
+            fileName = dto.IsDirectory ? $"{baseName}.tar.gz" : baseName;
+        }
+        else if (dto.IsDirectory)
+        {
+            resolvedSourcePath = dto.Path;
             var baseName = Path.GetFileName(dto.Path.TrimEnd('/', '\\'));
             if (string.IsNullOrEmpty(baseName)) baseName = "root_folder";
             fileName = $"{baseName}.tar.gz";
         }
         else
         {
-            var singlePath = dto.SelectedPaths?.FirstOrDefault() ?? dto.Path;
-            fileName = Path.GetFileName(singlePath);
+            resolvedSourcePath = dto.Path;
+            fileName = Path.GetFileName(dto.Path);
             if (string.IsNullOrEmpty(fileName)) fileName = "downloaded_file";
         }
 
@@ -56,8 +67,8 @@ public class PrepareDownloadHandler(
         // Generar URL prefirmada PUT para que el agente suba a MinIO (válida por 2 horas)
         var uploadUrl = await minio.GetPresignedUploadUrlAsync(minioObjectName, expirySeconds: 7200);
 
-        logger.LogInformation("Solicitando empaquetado/subida de descarga [{DownloadId}] para {MachineId} ({FileName})...",
-            downloadId, machine.Hostname, fileName);
+        logger.LogInformation("Solicitando empaquetado/subida de descarga [{DownloadId}] para {MachineId} ({FileName}, source: {SourcePath})...",
+            downloadId, machine.Hostname, fileName, resolvedSourcePath);
 
         var rawResult = await browseManager.RequestDownloadAsync(
             downloadId,
@@ -70,7 +81,7 @@ public class PrepareDownloadHandler(
                     new
                     {
                         downloadId = downloadId,
-                        sourcePath = dto.Path,
+                        sourcePath = resolvedSourcePath,
                         isDirectory = dto.IsDirectory,
                         selectedPaths = dto.SelectedPaths,
                         uploadUrl = uploadUrl,
