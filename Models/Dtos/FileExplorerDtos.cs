@@ -59,3 +59,19 @@ public record TransferProgressDto(
     long SizeBytes,
     string? ErrorMessage
 );
+
+public record RequestDownloadDto(
+    string MachineId,
+    string Path,
+    bool IsDirectory,
+    List<string>? SelectedPaths = null
+);
+
+public record DownloadResultDto(
+    string DownloadId,
+    string FileName,
+    string DownloadUrl,
+    long SizeBytes,
+    string? Error = null
+);
+
