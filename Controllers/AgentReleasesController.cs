@@ -12,7 +12,7 @@ public class AgentReleasesController(IMediator mediator, IMinioService minio) : 
     private async Task<string> GenerateInstallCommandAsync(int expirySeconds = 604800)
     {
         var presignedUrl = await minio.GetPresignedDownloadUrlAsync(UpdateAgentHandler.PackageObjectName, expirySeconds);
-        return $"curl -fsSL '{presignedUrl}' -o /tmp/pkg.tar.gz && cd /tmp && tar -xzf pkg.tar.gz && sudo bash install.sh";
+        return $"mkdir -p /tmp/infoclus_agent_pkg && cd /tmp/infoclus_agent_pkg && curl -fsSL '{presignedUrl}' -o package.tar.gz && tar -xzf package.tar.gz && chmod +x install.sh agent.py && sudo bash install.sh";
     }
 
     [HttpGet("install-command")]
