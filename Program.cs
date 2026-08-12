@@ -120,7 +120,9 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     }
 });
 
-// RabbitMQ services
+// RabbitMQ, Minio & File services
+builder.Services.AddSingleton<IMinioService, MinioService>();
+builder.Services.AddSingleton<IFileBrowseManager, FileBrowseManager>();
 builder.Services.AddSingleton<IRabbitMqService, RabbitMqService>();
 builder.Services.AddHostedService<AgentMessageProcessor>();
 
@@ -167,5 +169,22 @@ app.MapHub<MachineHub>("/hubs/machines");
 
 // Inicialización y seed de base de datos
 await DbInitializer.SeedAsync(app.Services);
+
+// Sincronización automática de releases de agente (agent.py + install.sh) a MinIO
+using (var scope = app.Services.CreateScope())
+{
+    try
+    {
+        var minio = scope.ServiceProvider.GetRequiredService<IMinioService>();
+        var env = scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
+        var logger = scope.ServiceProvider.GetRequiredService<ILogger<InfoClusMonitor.Api.Features.Agents.UpdateAgentHandler>>();
+        var releaseHandler = new InfoClusMonitor.Api.Features.Agents.UpdateAgentHandler(null!, minio, null!, env, logger);
+        await releaseHandler.EnsureReleasePackageInMinioAsync();
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "No se pudo sincronizar automáticamente el paquete de release a MinIO en el arranque: {Message}", ex.Message);
+    }
+}
 
 app.Run();

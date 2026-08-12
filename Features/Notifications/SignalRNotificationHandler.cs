@@ -9,7 +9,10 @@ public class SignalRNotificationHandler(IHubContext<MachineHub> hub) :
     INotificationHandler<MachineUpdatedNotification>,
     INotificationHandler<MachineDeletedNotification>,
     INotificationHandler<CommandCreatedNotification>,
-    INotificationHandler<CommandUpdatedNotification>
+    INotificationHandler<CommandUpdatedNotification>,
+    INotificationHandler<TransferCreatedNotification>,
+    INotificationHandler<TransferUpdatedNotification>,
+    INotificationHandler<DirectoryLoadedNotification>
 {
     public async Task Handle(MachineCreatedNotification notification, CancellationToken ct)
     {
@@ -45,5 +48,35 @@ public class SignalRNotificationHandler(IHubContext<MachineHub> hub) :
             .SendAsync("CommandUpdated", cmd, ct);
         await hub.Clients.Group("all-machines")
             .SendAsync("CommandUpdated", cmd, ct);
+    }
+
+    public async Task Handle(TransferCreatedNotification notification, CancellationToken ct)
+    {
+        var transfer = notification.Transfer;
+        await hub.Clients.Group("all-machines")
+            .SendAsync("TransferCreated", transfer, ct);
+        await hub.Clients.Group($"machine-{transfer.SourceMachineId}")
+            .SendAsync("TransferCreated", transfer, ct);
+        await hub.Clients.Group($"machine-{transfer.TargetMachineId}")
+            .SendAsync("TransferCreated", transfer, ct);
+    }
+
+    public async Task Handle(TransferUpdatedNotification notification, CancellationToken ct)
+    {
+        var transfer = notification.Transfer;
+        await hub.Clients.Group("all-machines")
+            .SendAsync("TransferUpdated", transfer, ct);
+        await hub.Clients.Group($"machine-{transfer.SourceMachineId}")
+            .SendAsync("TransferUpdated", transfer, ct);
+        await hub.Clients.Group($"machine-{transfer.TargetMachineId}")
+            .SendAsync("TransferUpdated", transfer, ct);
+    }
+
+    public async Task Handle(DirectoryLoadedNotification notification, CancellationToken ct)
+    {
+        await hub.Clients.Group($"machine-{notification.MachineId}")
+            .SendAsync("DirectoryLoaded", notification.Content, ct);
+        await hub.Clients.Group("all-machines")
+            .SendAsync("DirectoryLoaded", notification.Content, ct);
     }
 }

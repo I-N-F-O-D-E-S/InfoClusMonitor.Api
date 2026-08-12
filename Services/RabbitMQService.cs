@@ -9,10 +9,12 @@ namespace InfoClusMonitor.Api.Services;
 public interface IRabbitMqService : IDisposable
 {
     Task SendCommandAsync(long commandId, string machineId, string parameters);
+    Task SendCustomCommandAsync(string machineId, string commandId, string type, object parameters);
     void StartConsuming(
         Func<AgentRegisterDto, Task> onRegister,
         Func<string, AgentHeartbeatDto, Task> onHeartbeat,
-        Func<CommandResultDto, Task> onResult
+        Func<CommandResultDto, Task> onResult,
+        Func<string, string, Task>? onRawMessage = null
     );
 }
 
@@ -48,13 +50,12 @@ public class RabbitMqService : IRabbitMqService
         _channel.ExchangeDeclareAsync(_exchange, ExchangeType.Topic, durable: true).Wait();
         _channel.QueueDeclareAsync(_eventsQueue, durable: true, exclusive: false, autoDelete: false).Wait();
 
-        // Usamos # para capturar cualquier sub-clave sin importar puntos o caracteres
+        // Bind all event routing keys
         _channel.QueueBindAsync(_eventsQueue, _exchange, "register.#").Wait();
-        _channel.QueueBindAsync(_eventsQueue, _exchange, "register.*").Wait();
         _channel.QueueBindAsync(_eventsQueue, _exchange, "heartbeat.#").Wait();
-        _channel.QueueBindAsync(_eventsQueue, _exchange, "heartbeat.*").Wait();
         _channel.QueueBindAsync(_eventsQueue, _exchange, "result.#").Wait();
-        _channel.QueueBindAsync(_eventsQueue, _exchange, "result.*").Wait();
+        _channel.QueueBindAsync(_eventsQueue, _exchange, "transfer.#").Wait();
+        _channel.QueueBindAsync(_eventsQueue, _exchange, "filebrowse.#").Wait();
 
         _logger.LogInformation("Cola de eventos {Queue} vinculada al exchange {Exchange} exitosamente.", _eventsQueue, _exchange);
     }
@@ -62,7 +63,8 @@ public class RabbitMqService : IRabbitMqService
     public void StartConsuming(
         Func<AgentRegisterDto, Task> onRegister,
         Func<string, AgentHeartbeatDto, Task> onHeartbeat,
-        Func<CommandResultDto, Task> onResult)
+        Func<CommandResultDto, Task> onResult,
+        Func<string, string, Task>? onRawMessage = null)
     {
         if (_isConsuming) return;
         _isConsuming = true;
@@ -77,6 +79,11 @@ public class RabbitMqService : IRabbitMqService
 
             try
             {
+                if (onRawMessage != null)
+                {
+                    await onRawMessage(routingKey, json);
+                }
+
                 if (routingKey.StartsWith("register.", StringComparison.OrdinalIgnoreCase))
                 {
                     var dto = JsonSerializer.Deserialize<AgentRegisterDto>(json, _jsonOptions);
@@ -141,6 +148,31 @@ public class RabbitMqService : IRabbitMqService
 
         await _channel.BasicPublishAsync(_exchange, routingKey, true, props, bytes);
         _logger.LogInformation("Comando publicado a RabbitMQ [{RoutingKey}]: {CommandId} -> {Parameters}", routingKey, commandId, parameters);
+    }
+
+    public async Task SendCustomCommandAsync(string machineId, string commandId, string type, object parameters)
+    {
+        var routingKey = $"command.{machineId}";
+
+        var body = JsonSerializer.Serialize(new
+        {
+            commandId = commandId,
+            machineId = machineId,
+            type = type,
+            parameters = parameters is string str ? str : JsonSerializer.Serialize(parameters)
+        });
+
+        var bytes = Encoding.UTF8.GetBytes(body);
+
+        var props = new BasicProperties
+        {
+            DeliveryMode = DeliveryModes.Persistent,
+            MessageId = commandId,
+            CorrelationId = commandId
+        };
+
+        await _channel.BasicPublishAsync(_exchange, routingKey, true, props, bytes);
+        _logger.LogInformation("Comando estructurado publicado a RabbitMQ [{RoutingKey}] tipo [{Type}]: {CommandId}", routingKey, type, commandId);
     }
 
     public void Dispose()

@@ -8,6 +8,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Machine> Machines => Set<Machine>();
     public DbSet<Command> Commands => Set<Command>();
     public DbSet<User> Users => Set<User>();
+    public DbSet<FileTransfer> FileTransfers => Set<FileTransfer>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -45,6 +46,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
                   .HasPrincipalKey(m => m.ExternalMachineId)
                   .HasForeignKey(c => c.ExternalMachineId)
                   .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<FileTransfer>(entity =>
+        {
+            entity.HasKey(t => t.Id);
+            entity.Property(t => t.Id).ValueGeneratedOnAdd();
+            entity.HasIndex(t => t.TransferId).IsUnique();
+            entity.HasIndex(t => t.SourceMachineId);
+            entity.HasIndex(t => t.TargetMachineId);
+            entity.HasIndex(t => t.Status);
+            entity.HasQueryFilter(t => !t.IsDeleted);
         });
     }
 }
