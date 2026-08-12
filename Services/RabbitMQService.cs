@@ -31,7 +31,7 @@ public class RabbitMqService : IRabbitMqService
     public RabbitMqService(IConfiguration configuration, ILogger<RabbitMqService> logger)
     {
         _logger = logger;
-        _eventsQueue = $"infoclus.backend.events.{Environment.MachineName.ToLowerInvariant()}_{Guid.NewGuid():N[..8]}";
+        _eventsQueue = $"infoclus.backend.events.{Environment.MachineName.ToLowerInvariant()}_{Guid.NewGuid().ToString("N")[..8]}";
 
         var factory = new ConnectionFactory
         {
