@@ -28,4 +28,17 @@ public class FilesController(IMediator mediator) : ControllerBase
         var result = await mediator.Send(new BrowseDirectoryQuery(req.MachineId, req.Path ?? "/"));
         return Ok(result);
     }
+
+    [HttpPost("download")]
+    public async Task<ActionResult<DownloadResultDto>> RequestDownload([FromBody] RequestDownloadDto req)
+    {
+        if (string.IsNullOrWhiteSpace(req.MachineId))
+            return BadRequest("El parámetro MachineId es obligatorio.");
+
+        var result = await mediator.Send(new PrepareDownloadCommand(req));
+        if (result.Error != null)
+            return BadRequest(new { error = result.Error });
+
+        return Ok(result);
+    }
 }

@@ -24,13 +24,14 @@ public class RabbitMqService : IRabbitMqService
     private readonly IChannel _channel;
     private readonly ILogger<RabbitMqService> _logger;
     private readonly string _exchange = "infoclus.commands";
-    private readonly string _eventsQueue = "infoclus.backend.events";
+    private readonly string _eventsQueue;
     private readonly JsonSerializerOptions _jsonOptions = new() { PropertyNameCaseInsensitive = true };
     private bool _isConsuming = false;
 
     public RabbitMqService(IConfiguration configuration, ILogger<RabbitMqService> logger)
     {
         _logger = logger;
+        _eventsQueue = $"infoclus.backend.events.{Environment.MachineName.ToLowerInvariant()}_{Guid.NewGuid():N[..8]}";
 
         var factory = new ConnectionFactory
         {
@@ -42,13 +43,13 @@ public class RabbitMqService : IRabbitMqService
             NetworkRecoveryInterval = TimeSpan.FromSeconds(5)
         };
 
-        _logger.LogInformation("Conectando RabbitMqService a {Host}:{Port}...", factory.HostName, factory.Port);
+        _logger.LogInformation("Conectando RabbitMqService a {Host}:{Port} con cola exclusiva {Queue}...", factory.HostName, factory.Port, _eventsQueue);
 
         _connection = factory.CreateConnectionAsync().Result;
         _channel = _connection.CreateChannelAsync().Result;
 
         _channel.ExchangeDeclareAsync(_exchange, ExchangeType.Topic, durable: true).Wait();
-        _channel.QueueDeclareAsync(_eventsQueue, durable: true, exclusive: false, autoDelete: false).Wait();
+        _channel.QueueDeclareAsync(_eventsQueue, durable: false, exclusive: false, autoDelete: true).Wait();
 
         // Bind all event routing keys
         _channel.QueueBindAsync(_eventsQueue, _exchange, "register.#").Wait();

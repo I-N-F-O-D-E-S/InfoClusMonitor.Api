@@ -143,6 +143,14 @@ public class AgentMessageProcessor(
                         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
                         await mediator.Send(new ProcessTransferDownloadCommand(commandId, status, error), stoppingToken);
                     }
+                    // Manejo de resultados de preparación de descargas a MinIO
+                    else if (string.Equals(type, "DownloadReadyResult", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "PrepareDownloadResult", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var status = root.TryGetProperty("status", out var sProp) ? sProp.GetString() ?? "Failed" : "Failed";
+                        long sizeBytes = root.TryGetProperty("sizeBytes", out var szProp) && szProp.TryGetInt64(out var sz) ? sz : 0;
+                        var error = root.TryGetProperty("error", out var errProp) ? errProp.GetString() : null;
+                        browseManager.SetDownloadResult(commandId, new RawDownloadResult(commandId, status, sizeBytes, error));
+                    }
                     // Manejo de resultados de exploración de carpetas
                     else if (string.Equals(type, "BrowseFilesResult", StringComparison.OrdinalIgnoreCase))
                     {
