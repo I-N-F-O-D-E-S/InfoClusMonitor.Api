@@ -4,6 +4,7 @@ using InfoClusMonitor.Api.Features.Agents;
 using InfoClusMonitor.Api.Features.Backups;
 using InfoClusMonitor.Api.Features.Commands;
 using InfoClusMonitor.Api.Features.Machines;
+using InfoClusMonitor.Api.Features.ScheduledTasks;
 using InfoClusMonitor.Api.Features.Transfers;
 using InfoClusMonitor.Api.Models.Dtos;
 using InfoClusMonitor.Api.Services;
@@ -175,6 +176,22 @@ public class AgentMessageProcessor(
                         var targetPath = root.TryGetProperty("targetPath", out var tpProp) ? tpProp.GetString() : "";
                         logger.LogInformation("[✓] Resultado de restauración de respaldo: {CommandId} -> {Status} en '{TargetPath}' (Error: {Error})",
                             commandId, status, targetPath, error ?? "ninguno");
+                    }
+                    // Manejo de resultados de Tareas Programadas (ScheduledCommand / ScheduledExecution)
+                    else if (string.Equals(type, "ScheduledExecutionResult", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "ScheduledCommandResult", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var executionId = commandId;
+                        var taskId = root.TryGetProperty("taskId", out var tProp) ? tProp.GetString() ?? "" : "";
+                        var status = root.TryGetProperty("status", out var sProp) ? sProp.GetString() ?? "Completed" : "Completed";
+                        var result = root.TryGetProperty("result", out var rProp) ? rProp.GetString() : null;
+                        var error = root.TryGetProperty("error", out var errProp) ? errProp.GetString() : null;
+                        int? exitCode = root.TryGetProperty("exitCode", out var codeProp) && codeProp.TryGetInt32(out var ec) ? ec : null;
+                        long durationMs = root.TryGetProperty("durationMs", out var dProp) && dProp.TryGetInt64(out var dm) ? dm : 0;
+
+                        using var scope = scopeFactory.CreateScope();
+                        var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
+                        await mediator.Send(new ProcessScheduledExecutionResultCommand(
+                            executionId, taskId, status, result, error, exitCode, durationMs), stoppingToken);
                     }
                     // Manejo de resultados de exploración de carpetas
                     else if (string.Equals(type, "BrowseFilesResult", StringComparison.OrdinalIgnoreCase))

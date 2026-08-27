@@ -10,6 +10,8 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<User> Users => Set<User>();
     public DbSet<FileTransfer> FileTransfers => Set<FileTransfer>();
     public DbSet<MachineBackup> Backups => Set<MachineBackup>();
+    public DbSet<ScheduledTask> ScheduledTasks => Set<ScheduledTask>();
+    public DbSet<ScheduledTaskExecution> ScheduledTaskExecutions => Set<ScheduledTaskExecution>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -69,6 +71,29 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasIndex(b => b.Status);
             entity.HasIndex(b => b.CreatedAt);
             entity.HasQueryFilter(b => !b.IsDeleted);
+        });
+
+        modelBuilder.Entity<ScheduledTask>(entity =>
+        {
+            entity.HasKey(s => s.Id);
+            entity.Property(s => s.Id).ValueGeneratedOnAdd();
+            entity.HasIndex(s => s.TaskId).IsUnique();
+            entity.HasIndex(s => s.MachineId);
+            entity.HasIndex(s => s.IsEnabled);
+            entity.HasIndex(s => s.NextRunAt);
+            entity.HasQueryFilter(s => !s.IsDeleted);
+        });
+
+        modelBuilder.Entity<ScheduledTaskExecution>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.Property(e => e.Id).ValueGeneratedOnAdd();
+            entity.HasIndex(e => e.ExecutionId).IsUnique();
+            entity.HasIndex(e => e.TaskId);
+            entity.HasIndex(e => e.MachineId);
+            entity.HasIndex(e => e.Status);
+            entity.HasIndex(e => e.StartedAt);
+            entity.HasQueryFilter(e => !e.IsDeleted);
         });
     }
 }

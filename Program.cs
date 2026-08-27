@@ -125,6 +125,7 @@ builder.Services.AddSingleton<IMinioService, MinioService>();
 builder.Services.AddSingleton<IFileBrowseManager, FileBrowseManager>();
 builder.Services.AddSingleton<IRabbitMqService, RabbitMqService>();
 builder.Services.AddHostedService<AgentMessageProcessor>();
+builder.Services.AddHostedService<ScheduledTaskSchedulerService>();
 
 // CORS
 var corsOrigins = builder.Configuration["Cors:AllowedOrigins"]?
