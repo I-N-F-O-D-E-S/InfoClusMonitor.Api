@@ -60,6 +60,12 @@ public class UpdateAgentHandler(
     {
         await minio.EnsurePublicReadBucketAsync(minio.ReleasesBucketName, ct);
 
+        // Asegurar saltos de línea estrictos UNIX LF (\n) sin retornos de carro (\r)
+        var agentClean = System.Text.Encoding.UTF8.GetString(agentBytes).Replace("\r\n", "\n").Replace("\r", "\n");
+        var installClean = System.Text.Encoding.UTF8.GetString(installBytes).Replace("\r\n", "\n").Replace("\r", "\n");
+        var cleanAgentBytes = System.Text.Encoding.UTF8.GetBytes(agentClean);
+        var cleanInstallBytes = System.Text.Encoding.UTF8.GetBytes(installClean);
+
         using var memoryStream = new MemoryStream();
         using (var gzipStream = new GZipStream(memoryStream, CompressionLevel.Optimal, leaveOpen: true))
         using (var tarWriter = new TarWriter(gzipStream))
@@ -67,14 +73,16 @@ public class UpdateAgentHandler(
             // 1. Agregar agent.py al archivo tar
             var agentEntry = new PaxTarEntry(TarEntryType.RegularFile, "agent.py")
             {
-                DataStream = new MemoryStream(agentBytes)
+                Mode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute,
+                DataStream = new MemoryStream(cleanAgentBytes)
             };
             await tarWriter.WriteEntryAsync(agentEntry, ct);
 
             // 2. Agregar install.sh al archivo tar
             var installEntry = new PaxTarEntry(TarEntryType.RegularFile, "install.sh")
             {
-                DataStream = new MemoryStream(installBytes)
+                Mode = UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupRead | UnixFileMode.GroupExecute | UnixFileMode.OtherRead | UnixFileMode.OtherExecute,
+                DataStream = new MemoryStream(cleanInstallBytes)
             };
             await tarWriter.WriteEntryAsync(installEntry, ct);
         }
@@ -101,8 +109,8 @@ public class UpdateAgentHandler(
         // URL pública y permanente para descargar el paquete sin expiración ni firmas
         var packageDownloadUrl = minio.GetPublicUrl(PackageObjectName, minio.ReleasesBucketName);
 
-        // El comando descarga el paquete, lo extrae y ejecuta install.sh
-        var updateBashScript = $"mkdir -p /tmp/infoclus_agent_pkg && cd /tmp/infoclus_agent_pkg && curl -fsSL '{packageDownloadUrl}' -o package.tar.gz && tar -xzf package.tar.gz && chmod +x install.sh agent.py && bash install.sh";
+        // El comando descarga el paquete, lo extrae y ejecuta install.sh asegurando que no tenga caracteres \r
+        var updateBashScript = $"mkdir -p /tmp/infoclus_agent_pkg && cd /tmp/infoclus_agent_pkg && curl -fsSL '{packageDownloadUrl}' -o package.tar.gz && tar -xzf package.tar.gz && sed -i 's/\\r$//' install.sh 2>/dev/null || true && chmod +x install.sh agent.py && bash install.sh";
 
         logger.LogInformation("Enviando orden de instalación/actualización con URL pública ({Url}) a {Hostname} ({MachineId})",
             packageDownloadUrl, machine.Hostname, machine.ExternalMachineId);

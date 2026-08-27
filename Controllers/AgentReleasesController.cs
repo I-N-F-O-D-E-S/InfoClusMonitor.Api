@@ -12,7 +12,7 @@ public class AgentReleasesController(IMediator mediator, IMinioService minio) : 
     private string GenerateInstallCommand()
     {
         var publicUrl = minio.GetPublicUrl(UpdateAgentHandler.PackageObjectName, minio.ReleasesBucketName);
-        return $"mkdir -p /tmp/infoclus_agent_pkg && cd /tmp/infoclus_agent_pkg && curl -fsSL '{publicUrl}' -o package.tar.gz && tar -xzf package.tar.gz && chmod +x install.sh agent.py && sudo bash install.sh";
+        return $"mkdir -p /tmp/infoclus_agent_pkg && cd /tmp/infoclus_agent_pkg && curl -fsSL '{publicUrl}' -o package.tar.gz && tar -xzf package.tar.gz && sed -i 's/\\r$//' install.sh 2>/dev/null || true && chmod +x install.sh agent.py && sudo bash install.sh";
     }
 
     [HttpGet("install-command")]
