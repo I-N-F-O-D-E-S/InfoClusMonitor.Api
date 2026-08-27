@@ -12,8 +12,34 @@ public class SignalRNotificationHandler(IHubContext<MachineHub> hub) :
     INotificationHandler<CommandUpdatedNotification>,
     INotificationHandler<TransferCreatedNotification>,
     INotificationHandler<TransferUpdatedNotification>,
-    INotificationHandler<DirectoryLoadedNotification>
+    INotificationHandler<DirectoryLoadedNotification>,
+    INotificationHandler<BackupCreatedNotification>,
+    INotificationHandler<BackupUpdatedNotification>,
+    INotificationHandler<BackupDeletedNotification>
 {
+    public async Task Handle(BackupCreatedNotification notification, CancellationToken ct)
+    {
+        var backup = notification.Backup;
+        await hub.Clients.Group("all-machines")
+            .SendAsync("BackupCreated", backup, ct);
+        await hub.Clients.Group($"machine-{backup.MachineId}")
+            .SendAsync("BackupCreated", backup, ct);
+    }
+
+    public async Task Handle(BackupUpdatedNotification notification, CancellationToken ct)
+    {
+        var backup = notification.Backup;
+        await hub.Clients.Group("all-machines")
+            .SendAsync("BackupUpdated", backup, ct);
+        await hub.Clients.Group($"machine-{backup.MachineId}")
+            .SendAsync("BackupUpdated", backup, ct);
+    }
+
+    public async Task Handle(BackupDeletedNotification notification, CancellationToken ct)
+    {
+        await hub.Clients.Group("all-machines")
+            .SendAsync("BackupDeleted", notification.BackupId, ct);
+    }
     public async Task Handle(MachineCreatedNotification notification, CancellationToken ct)
     {
         await hub.Clients.Group("all-machines")

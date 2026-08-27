@@ -22,7 +22,7 @@ public class UpdateAgentHandler(
     IRequestHandler<UpdateAgentCommand, Command>,
     IRequestHandler<UpdateAllAgentsCommand, List<Command>>
 {
-    public const string PackageObjectName = "releases/agent-package.tar.gz";
+    public const string PackageObjectName = "agent-package.tar.gz";
 
     public async Task EnsureReleasePackageInMinioAsync(CancellationToken ct = default)
     {
@@ -52,12 +52,14 @@ public class UpdateAgentHandler(
             var installContent = await File.ReadAllBytesAsync(installPath, ct);
 
             await CreateAndUploadTarGzPackageAsync(agentContent, installContent, ct);
-            logger.LogInformation("Paquete unificado (agent.py + install.sh) empaquetado y subido a MinIO exitosamente.");
+            logger.LogInformation("Paquete unificado (agent.py + install.sh) empaquetado y subido a MinIO ({Bucket}) exitosamente.", minio.ReleasesBucketName);
         }
     }
 
     public async Task CreateAndUploadTarGzPackageAsync(byte[] agentBytes, byte[] installBytes, CancellationToken ct = default)
     {
+        await minio.EnsurePublicReadBucketAsync(minio.ReleasesBucketName, ct);
+
         using var memoryStream = new MemoryStream();
         using (var gzipStream = new GZipStream(memoryStream, CompressionLevel.Optimal, leaveOpen: true))
         using (var tarWriter = new TarWriter(gzipStream))
@@ -78,7 +80,7 @@ public class UpdateAgentHandler(
         }
 
         memoryStream.Position = 0;
-        await minio.UploadStreamAsync(PackageObjectName, memoryStream, memoryStream.Length, "application/gzip", ct: ct);
+        await minio.UploadStreamAsync(PackageObjectName, memoryStream, memoryStream.Length, "application/gzip", bucketName: minio.ReleasesBucketName, ct: ct);
     }
 
     public async Task<Command> Handle(UpdateAgentCommand cmd, CancellationToken ct)
@@ -96,14 +98,14 @@ public class UpdateAgentHandler(
 
         await EnsureReleasePackageInMinioAsync(ct);
 
-        // Generar URL prefirmada temporal para el paquete unificado .tar.gz (válida por 24 horas)
-        var packageDownloadUrl = await minio.GetPresignedDownloadUrlAsync(PackageObjectName, expirySeconds: 86400);
+        // URL pública y permanente para descargar el paquete sin expiración ni firmas
+        var packageDownloadUrl = minio.GetPublicUrl(PackageObjectName, minio.ReleasesBucketName);
 
-        // El comando descarga el paquete, lo extrae (garantizando agent.py e install.sh juntos en la misma carpeta) y ejecuta install.sh
+        // El comando descarga el paquete, lo extrae y ejecuta install.sh
         var updateBashScript = $"mkdir -p /tmp/infoclus_agent_pkg && cd /tmp/infoclus_agent_pkg && curl -fsSL '{packageDownloadUrl}' -o package.tar.gz && tar -xzf package.tar.gz && chmod +x install.sh agent.py && bash install.sh";
 
-        logger.LogInformation("Enviando orden de instalación/actualización con paquete unificado a {Hostname} ({MachineId})",
-            machine.Hostname, machine.ExternalMachineId);
+        logger.LogInformation("Enviando orden de instalación/actualización con URL pública ({Url}) a {Hostname} ({MachineId})",
+            packageDownloadUrl, machine.Hostname, machine.ExternalMachineId);
 
         return await mediator.Send(new CreateCommandCommand(machine.ExternalMachineId, updateBashScript), ct);
     }

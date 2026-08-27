@@ -1,6 +1,7 @@
 using System.Text.Json;
 using MediatR;
 using InfoClusMonitor.Api.Features.Agents;
+using InfoClusMonitor.Api.Features.Backups;
 using InfoClusMonitor.Api.Features.Commands;
 using InfoClusMonitor.Api.Features.Machines;
 using InfoClusMonitor.Api.Features.Transfers;
@@ -133,6 +134,21 @@ public class AgentMessageProcessor(
                         var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
                         await mediator.Send(new ProcessTransferUploadCommand(commandId, status, sizeBytes, error), stoppingToken);
                     }
+                    // Manejo de resultados de Copias de Seguridad (Backup)
+                    else if (string.Equals(type, "BackupResult", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var status = root.TryGetProperty("status", out var sProp) ? sProp.GetString() ?? "Failed" : "Failed";
+                        long sizeBytes = 0;
+                        if (root.TryGetProperty("sizeBytes", out var sizeProp) && sizeProp.TryGetInt64(out var sz))
+                        {
+                            sizeBytes = sz;
+                        }
+                        var error = root.TryGetProperty("error", out var errProp) ? errProp.GetString() : null;
+
+                        using var scope = scopeFactory.CreateScope();
+                        var mediator = scope.ServiceProvider.GetRequiredService<IMediator>();
+                        await mediator.Send(new ProcessBackupResultCommand(commandId, status, sizeBytes, error), stoppingToken);
+                    }
                     // Manejo de resultados de descarga de transferencia desde MinIO
                     else if (string.Equals(type, "TransferDownloadResult", StringComparison.OrdinalIgnoreCase))
                     {
@@ -150,6 +166,15 @@ public class AgentMessageProcessor(
                         long sizeBytes = root.TryGetProperty("sizeBytes", out var szProp) && szProp.TryGetInt64(out var sz) ? sz : 0;
                         var error = root.TryGetProperty("error", out var errProp) ? errProp.GetString() : null;
                         browseManager.SetDownloadResult(commandId, new RawDownloadResult(commandId, status, sizeBytes, error));
+                    }
+                    // Manejo de resultados de restauración de copias de seguridad
+                    else if (string.Equals(type, "RestoreBackupResult", StringComparison.OrdinalIgnoreCase) || string.Equals(type, "BackupRestoreResult", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var status = root.TryGetProperty("status", out var sProp) ? sProp.GetString() ?? "Failed" : "Failed";
+                        var error = root.TryGetProperty("error", out var errProp) ? errProp.GetString() : null;
+                        var targetPath = root.TryGetProperty("targetPath", out var tpProp) ? tpProp.GetString() : "";
+                        logger.LogInformation("[✓] Resultado de restauración de respaldo: {CommandId} -> {Status} en '{TargetPath}' (Error: {Error})",
+                            commandId, status, targetPath, error ?? "ninguno");
                     }
                     // Manejo de resultados de exploración de carpetas
                     else if (string.Equals(type, "BrowseFilesResult", StringComparison.OrdinalIgnoreCase))
