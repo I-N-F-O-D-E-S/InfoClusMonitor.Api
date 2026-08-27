@@ -7,7 +7,11 @@ namespace InfoClusMonitor.Api.Services;
 public interface IMinioService
 {
     string BucketName { get; }
+    string BackupsBucketName { get; }
+    string ReleasesBucketName { get; }
+    string GetPublicUrl(string objectName, string? bucketName = null);
     Task EnsureBucketExistsAsync(string? bucketName = null, CancellationToken ct = default);
+    Task EnsurePublicReadBucketAsync(string? bucketName = null, CancellationToken ct = default);
     Task<string> GetPresignedUploadUrlAsync(string objectName, int expirySeconds = 7200, string? bucketName = null);
     Task<string> GetPresignedDownloadUrlAsync(string objectName, int expirySeconds = 7200, string? bucketName = null);
     Task UploadStreamAsync(string objectName, Stream data, long size, string contentType = "application/octet-stream", string? bucketName = null, CancellationToken ct = default);
@@ -19,23 +23,32 @@ public class MinioService : IMinioService
 {
     private readonly IMinioClient _client;
     private readonly ILogger<MinioService> _logger;
+    private readonly string _endpoint;
     private readonly string _defaultBucket;
+    private readonly string _backupsBucket;
+    private readonly string _releasesBucket;
 
     public string BucketName => _defaultBucket;
+    public string BackupsBucketName => _backupsBucket;
+    public string ReleasesBucketName => _releasesBucket;
 
     public MinioService(IConfiguration configuration, ILogger<MinioService> logger)
     {
         _logger = logger;
-        var endpoint = configuration["Minio:Endpoint"] ?? "storage-api.prod.cloud-net.xyz";
-        var accessKey = configuration["Minio:AccessKey"] ?? "ym1BFuAl4fd8hrbi";
-        var secretKey = configuration["Minio:SecretKey"] ?? "lLkSFVSK9QvieJpA9RODZYuJ6YYBbvh2";
+        var endpoint = configuration["Minio:Endpoint"] ?? "storageapi.mrapy.com";
+        var accessKey = configuration["Minio:AccessKey"] ?? "buhoadmin";
+        var secretKey = configuration["Minio:SecretKey"] ?? "Maca*2023";
         _defaultBucket = configuration["Minio:BucketName"] ?? "infoclus-transfers";
+        _backupsBucket = configuration["Minio:BackupsBucketName"] ?? "copias-de-seguridad";
+        _releasesBucket = configuration["Minio:ReleasesBucketName"] ?? "infoclus-releases";
         var useSsl = bool.Parse(configuration["Minio:UseSSL"] ?? "true");
 
         // Clean endpoint if user provided protocol prefix
         endpoint = endpoint.Replace("https://", "", StringComparison.OrdinalIgnoreCase)
                            .Replace("http://", "", StringComparison.OrdinalIgnoreCase)
                            .TrimEnd('/');
+
+        _endpoint = endpoint;
 
         var builder = new MinioClient()
             .WithEndpoint(endpoint)
@@ -47,6 +60,48 @@ public class MinioService : IMinioService
         }
 
         _client = builder.Build();
+    }
+
+    public string GetPublicUrl(string objectName, string? bucketName = null)
+    {
+        var targetBucket = bucketName ?? _releasesBucket;
+        return $"https://{_endpoint}/{targetBucket}/{objectName.TrimStart('/')}";
+    }
+
+    public async Task EnsurePublicReadBucketAsync(string? bucketName = null, CancellationToken ct = default)
+    {
+        var targetBucket = bucketName ?? _releasesBucket;
+        await EnsureBucketExistsAsync(targetBucket, ct);
+
+        try
+        {
+            var policy = $$"""
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                {
+                  "Effect": "Allow",
+                  "Principal": {"AWS": ["*"]},
+                  "Action": ["s3:GetBucketLocation", "s3:ListBucket"],
+                  "Resource": ["arn:aws:s3:::{{targetBucket}}"]
+                },
+                {
+                  "Effect": "Allow",
+                  "Principal": {"AWS": ["*"]},
+                  "Action": ["s3:GetObject"],
+                  "Resource": ["arn:aws:s3:::{{targetBucket}}/*"]
+                }
+              ]
+            }
+            """;
+            var spArgs = new SetPolicyArgs().WithBucket(targetBucket).WithPolicy(policy);
+            await _client.SetPolicyAsync(spArgs, ct);
+            _logger.LogInformation("Política de lectura pública aplicada al bucket {Bucket}", targetBucket);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "No se pudo aplicar la política de lectura pública a {Bucket}: {Message}", targetBucket, ex.Message);
+        }
     }
 
     public async Task EnsureBucketExistsAsync(string? bucketName = null, CancellationToken ct = default)

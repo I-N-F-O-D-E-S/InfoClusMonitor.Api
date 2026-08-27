@@ -9,23 +9,25 @@ namespace InfoClusMonitor.Api.Controllers;
 [Route("api/[controller]")]
 public class AgentReleasesController(IMediator mediator, IMinioService minio) : ControllerBase
 {
-    private async Task<string> GenerateInstallCommandAsync(int expirySeconds = 604800)
+    private string GenerateInstallCommand()
     {
-        var presignedUrl = await minio.GetPresignedDownloadUrlAsync(UpdateAgentHandler.PackageObjectName, expirySeconds);
-        return $"mkdir -p /tmp/infoclus_agent_pkg && cd /tmp/infoclus_agent_pkg && curl -fsSL '{presignedUrl}' -o package.tar.gz && tar -xzf package.tar.gz && chmod +x install.sh agent.py && sudo bash install.sh";
+        var publicUrl = minio.GetPublicUrl(UpdateAgentHandler.PackageObjectName, minio.ReleasesBucketName);
+        return $"mkdir -p /tmp/infoclus_agent_pkg && cd /tmp/infoclus_agent_pkg && curl -fsSL '{publicUrl}' -o package.tar.gz && tar -xzf package.tar.gz && chmod +x install.sh agent.py && sudo bash install.sh";
     }
 
     [HttpGet("install-command")]
     public async Task<ActionResult> GetInstallCommand()
     {
-        var packageExists = await minio.ObjectExistsAsync(UpdateAgentHandler.PackageObjectName);
-        var command = await GenerateInstallCommandAsync();
+        var packageExists = await minio.ObjectExistsAsync(UpdateAgentHandler.PackageObjectName, minio.ReleasesBucketName);
+        var command = GenerateInstallCommand();
+        var downloadUrl = minio.GetPublicUrl(UpdateAgentHandler.PackageObjectName, minio.ReleasesBucketName);
 
         return Ok(new
         {
             packageAvailable = packageExists,
             installCommand = command,
-            targetVersion = "1.1.0"
+            downloadUrl = downloadUrl,
+            targetVersion = "1.2.0"
         });
     }
 
@@ -56,12 +58,14 @@ public class AgentReleasesController(IMediator mediator, IMinioService minio) : 
         var handler = new UpdateAgentHandler(null!, minio, mediator, null!, null!);
         await handler.CreateAndUploadTarGzPackageAsync(agentBytes, installBytes);
 
-        var installCommand = await GenerateInstallCommandAsync();
+        var installCommand = GenerateInstallCommand();
+        var downloadUrl = minio.GetPublicUrl(UpdateAgentHandler.PackageObjectName, minio.ReleasesBucketName);
 
         return Ok(new
         {
             message = "Paquete (agent.py + install.sh) subido y empaquetado exitosamente en MinIO.",
             installCommand = installCommand,
+            downloadUrl = downloadUrl,
             agentSize = agentFile.Length,
             installSize = installFile.Length
         });

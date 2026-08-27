@@ -9,6 +9,7 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
     public DbSet<Command> Commands => Set<Command>();
     public DbSet<User> Users => Set<User>();
     public DbSet<FileTransfer> FileTransfers => Set<FileTransfer>();
+    public DbSet<MachineBackup> Backups => Set<MachineBackup>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -57,6 +58,17 @@ public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(op
             entity.HasIndex(t => t.TargetMachineId);
             entity.HasIndex(t => t.Status);
             entity.HasQueryFilter(t => !t.IsDeleted);
+        });
+
+        modelBuilder.Entity<MachineBackup>(entity =>
+        {
+            entity.HasKey(b => b.Id);
+            entity.Property(b => b.Id).ValueGeneratedOnAdd();
+            entity.HasIndex(b => b.BackupId).IsUnique();
+            entity.HasIndex(b => b.MachineId);
+            entity.HasIndex(b => b.Status);
+            entity.HasIndex(b => b.CreatedAt);
+            entity.HasQueryFilter(b => !b.IsDeleted);
         });
     }
 }
