@@ -35,10 +35,10 @@ public class RabbitMqService : IRabbitMqService
 
         var factory = new ConnectionFactory
         {
-            HostName = configuration["RabbitMQ:Host"] ?? "45.10.154.37",
+            HostName = configuration["RabbitMQ:Host"] ?? "173.212.195.170",
             Port = int.Parse(configuration["RabbitMQ:Port"] ?? "5672"),
-            UserName = configuration["RabbitMQ:Username"] ?? "infodes",
-            Password = configuration["RabbitMQ:Password"] ?? "SydJqe93jV4o",
+            UserName = configuration["RabbitMQ:Username"] ?? "admin",
+            Password = configuration["RabbitMQ:Password"] ?? "Maca*2023",
             AutomaticRecoveryEnabled = true,
             NetworkRecoveryInterval = TimeSpan.FromSeconds(5)
         };

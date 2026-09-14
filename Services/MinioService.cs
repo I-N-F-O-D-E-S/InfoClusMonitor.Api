@@ -35,9 +35,9 @@ public class MinioService : IMinioService
     public MinioService(IConfiguration configuration, ILogger<MinioService> logger)
     {
         _logger = logger;
-        var endpoint = configuration["Minio:Endpoint"] ?? "storageapi.mrapy.com";
-        var accessKey = configuration["Minio:AccessKey"] ?? "buhoadmin";
-        var secretKey = configuration["Minio:SecretKey"] ?? "Maca*2023";
+        var endpoint = configuration["Minio:Endpoint"] ?? "s3-api.apps.mrapy.com";
+        var accessKey = configuration["Minio:AccessKey"] ?? "74a85786ebae076665d92086";
+        var secretKey = configuration["Minio:SecretKey"] ?? "56874744451e7ba5f192371c79ecd31bc9740e";
         _defaultBucket = configuration["Minio:BucketName"] ?? "infoclus-transfers";
         _backupsBucket = configuration["Minio:BackupsBucketName"] ?? "copias-de-seguridad";
         _releasesBucket = configuration["Minio:ReleasesBucketName"] ?? "infoclus-releases";
