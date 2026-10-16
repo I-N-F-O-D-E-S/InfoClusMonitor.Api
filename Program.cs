@@ -126,6 +126,7 @@ builder.Services.AddSingleton<IFileBrowseManager, FileBrowseManager>();
 builder.Services.AddSingleton<IRabbitMqService, RabbitMqService>();
 builder.Services.AddHostedService<AgentMessageProcessor>();
 builder.Services.AddHostedService<ScheduledTaskSchedulerService>();
+builder.Services.AddHostedService<StorageMaintenanceService>();
 
 // CORS
 var corsOrigins = builder.Configuration["Cors:AllowedOrigins"]?

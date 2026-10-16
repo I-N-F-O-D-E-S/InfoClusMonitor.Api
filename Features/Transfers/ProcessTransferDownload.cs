@@ -30,6 +30,14 @@ public class ProcessTransferDownloadHandler(
             return false;
         }
 
+        // Idempotencia: ignorar entregas duplicadas/extemporáneas sobre un estado terminal.
+        if (transfer.Status is TransferStatus.Completed or TransferStatus.Failed or TransferStatus.Cancelled)
+        {
+            logger.LogWarning("Resultado de descarga ignorado para [{TransferId}]: estado terminal '{Status}' (entrega duplicada o extemporánea).",
+                transfer.TransferId, transfer.Status);
+            return false;
+        }
+
         // LIMPIEZA TEMPORAL: Borrar de MinIO el archivo utilizado para la transferencia
         try
         {

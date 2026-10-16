@@ -1,4 +1,5 @@
 using Minio;
+using Minio.DataModel;
 using Minio.DataModel.Args;
 using Minio.Exceptions;
 
@@ -17,6 +18,7 @@ public interface IMinioService
     Task UploadStreamAsync(string objectName, Stream data, long size, string contentType = "application/octet-stream", string? bucketName = null, CancellationToken ct = default);
     Task RemoveObjectAsync(string objectName, string? bucketName = null, CancellationToken ct = default);
     Task<bool> ObjectExistsAsync(string objectName, string? bucketName = null, CancellationToken ct = default);
+    Task<int> RemoveObjectsOlderThanAsync(string prefix, TimeSpan maxAge, string? bucketName = null, CancellationToken ct = default);
 }
 
 public class MinioService : IMinioService
@@ -205,5 +207,60 @@ public class MinioService : IMinioService
             _logger.LogWarning(ex, "Error al consultar existencia de {Object} en MinIO.", objectName);
             return false;
         }
+    }
+
+    public async Task<int> RemoveObjectsOlderThanAsync(string prefix, TimeSpan maxAge, string? bucketName = null, CancellationToken ct = default)
+    {
+        var targetBucket = bucketName ?? _defaultBucket;
+        var cutoffUtc = DateTime.UtcNow - maxAge;
+        var removed = 0;
+
+        try
+        {
+            var args = new ListObjectsArgs()
+                .WithBucket(targetBucket)
+                .WithPrefix(prefix)
+                .WithRecursive(true);
+
+            var staleObjects = new List<string>();
+            await foreach (var item in _client.ListObjectsEnumAsync(args, ct))
+            {
+                var isDirectoryMarker = string.IsNullOrEmpty(item.Key) || item.Key.EndsWith('/');
+                if (isDirectoryMarker) continue;
+
+                var lastModified = item.LastModifiedDateTime;
+                if (lastModified.HasValue && lastModified.Value.ToUniversalTime() < cutoffUtc)
+                {
+                    staleObjects.Add(item.Key);
+                }
+            }
+
+            foreach (var key in staleObjects)
+            {
+                try
+                {
+                    var rmArgs = new RemoveObjectArgs().WithBucket(targetBucket).WithObject(key);
+                    await _client.RemoveObjectAsync(rmArgs, ct);
+                    removed++;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "No se pudo eliminar el objeto temporal {Object} del bucket {Bucket}.", key, targetBucket);
+                }
+            }
+
+            if (removed > 0)
+            {
+                _logger.LogInformation("Limpieza MinIO: {Count} objeto(s) con prefijo '{Prefix}' eliminados del bucket {Bucket}.",
+                    removed, prefix, targetBucket);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "No se pudo ejecutar la limpieza de objetos con prefijo '{Prefix}' en {Bucket}: {Message}",
+                prefix, targetBucket, ex.Message);
+        }
+
+        return removed;
     }
 }

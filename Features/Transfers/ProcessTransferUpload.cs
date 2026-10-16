@@ -32,6 +32,15 @@ public class ProcessTransferUploadHandler(
             return false;
         }
 
+        // Idempotencia: si ya se procesó la subida (estado distinto de Uploading),
+        // ignorar entregas duplicadas para no reenviar la orden de descarga.
+        if (transfer.Status != TransferStatus.Uploading)
+        {
+            logger.LogWarning("Resultado de subida ignorado para [{TransferId}]: estado actual '{Status}' (entrega duplicada o extemporánea).",
+                transfer.TransferId, transfer.Status);
+            return false;
+        }
+
         if (cmd.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase) ||
             cmd.Status.Equals("Success", StringComparison.OrdinalIgnoreCase))
         {
